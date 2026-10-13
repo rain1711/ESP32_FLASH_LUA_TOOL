@@ -455,11 +455,11 @@ local function md5_finish(st)
 	end
 	return wh(st.a) .. wh(st.b) .. wh(st.c) .. wh(st.d)
 end
-local function md5_of_file(job)
+local function md5_of_file(job, on_progress, tag)
 	local path, size = job.path, job.fsize
 	if not job.exist or not size or size <= 0 then return nil end
 	local st = md5_new()
-	local off = 0
+	local off, last = 0, -1
 	while off < size do
 		local n = math.min(4096, size - off)
 		local len, bin = f_read(path, off, n)
@@ -467,6 +467,13 @@ local function md5_of_file(job)
 		md5_update(st, string.sub(bin, 1, len))
 		bin = nil
 		off = off + len
+		if on_progress then
+			local pct = math.floor(off * 100 / size)
+			if pct - last >= 10 then
+				last = pct
+				on_progress(nil, string.format("%s MD5 %d%%", tag, pct))
+			end
+		end
 	end
 	return md5_finish(st)
 end
@@ -474,7 +481,8 @@ function ESP.verify_all(self, jobs, on_progress)
 	for i, job in ipairs(jobs) do
 		local fsize = job.fsize
 		if on_progress then on_progress(nil, string.format("校验 %d/%d %s", i, #jobs, job.name)) end
-		local expect = md5_of_file(job)
+		local expect = md5_of_file(job, on_progress, string.format("校验%d/%d %s", i, #jobs, job.name))
+		if on_progress then on_progress(nil, string.format("校验%d/%d %s 片上", i, #jobs, job.name)) end
 		local got = self:flash_md5(job.offset, fsize)
 		if not expect or not got then return false, "校验失败:" .. job.name end
 		if string.lower(expect) ~= string.lower(got) then
