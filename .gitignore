@@ -1,0 +1,3 @@
+# bin 不进仓库（走 GitHub Release 附件发包）
+firmware/*/*.bin
+*.bin

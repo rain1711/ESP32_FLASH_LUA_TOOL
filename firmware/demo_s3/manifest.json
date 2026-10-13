@@ -1,0 +1,4 @@
+{"label": "demo_s3", "chip": "ESP32-S3",
+ "files": [{"path": "bootloader.bin", "offset": "0x0"},
+           {"path": "partition-table.bin", "offset": "0x8000"},
+           {"path": "firmware.bin", "offset": "0x10000"}]}
