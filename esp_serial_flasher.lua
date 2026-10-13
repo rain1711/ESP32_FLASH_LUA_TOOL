@@ -316,6 +316,7 @@ function ESP.sync(self)
     local seq = "\x07\x07\x12\x20" .. string.rep("\x55", 32)
     self:send_frame(CMD.SYNC, seq)
     for attempt = 1, CFG.SYNC_TRIALS do
+        print("SYNC try " .. attempt)
         local ok = false
         for _ = 1, 8 do
             local pkt = self:read_packet(400)
@@ -325,6 +326,7 @@ function ESP.sync(self)
             end
         end
         if ok then
+            print("SYNC OK")
             return true
         end
         delayms(120)
@@ -335,8 +337,10 @@ function ESP.sync(self)
 end
 function ESP.detect_chip(self)
     local chip_name = nil
+    print("¶ÁÐ¾Æ¬¼Ä´æÆ÷...")
     local pkt = self:send_command(CMD.READ_REG, le32(0x40001000), nil, 4000)
     if pkt and pkt.value then
+        print(string.format("magic=0x%08X", pkt.value))
         chip_name = MAGIC[pkt.value]
     else
     end
@@ -359,6 +363,7 @@ function ESP.detect_chip(self)
     return nil
 end
 function ESP.spi_attach(self)
+    print("SPI ATTACH")
     if self.attach_method == "8266" then
         return self:send_command(CMD.FLASH_BEGIN, le32(0) .. le32(0) .. le32(0) .. le32(0), nil, 5000)
     else
@@ -366,6 +371,7 @@ function ESP.spi_attach(self)
     end
 end
 function ESP.spi_set_params(self)
+    print("SPI SET PARAMS")
     return self:send_command(
         CMD.SPI_SET_PARAMS,
         le32(0) .. le32(CFG.FLASH_SIZE) .. le32(0x10000) .. le32(0x1000) .. le32(0x100) .. le32(0xFFFF),
@@ -374,6 +380,7 @@ function ESP.spi_set_params(self)
     )
 end
 function ESP.flash_begin(self, offset, erase_size, block_size, num_blocks)
+    print(string.format("BEGIN off=0x%X n=%d", offset, num_blocks))
     local payload =
         le32(erase_size) ..
         le32(num_blocks) .. le32(block_size) .. le32(offset) .. (self.encryption_field and le32(0) or "")
@@ -482,7 +489,8 @@ function ESP.flash_one(self, job, on_progress, idx, total)
         print("FLASH_BEGIN ÃüÁî±»Ð¾Æ¬¾Ü¾ø")
         return false, "BEGINÊ§°Ü"
     end
-    local seq, addr = 0, 0
+    print("ÉÕÂ¼:" .. job.name)
+    local seq, addr, last_pct = 0, 0, -1
     while addr < fsize do
         local chunk = math.min(bs, fsize - addr)
         local _, bin = f_read(job.path, addr, chunk)
@@ -496,6 +504,13 @@ function ESP.flash_one(self, job, on_progress, idx, total)
             return false, "Ð´Êý¾ÝÊ§°Ü @¿é" .. seq
         end
         seq, addr = seq + 1, addr + #bin
+        do
+            local pct = math.floor(addr * 100 / fsize)
+            if pct - last_pct >= 10 then
+                last_pct = pct
+                print(string.format("%s %d%%", job.name, pct))
+            end
+        end
         if on_progress then
             on_progress(
                 math.floor(addr * 100 / fsize),
@@ -503,12 +518,14 @@ function ESP.flash_one(self, job, on_progress, idx, total)
             )
         end
     end
+    print("Íê³É:" .. job.name)
     return true
 end
 function ESP.flash_all(self, jobs, expected_chip, on_progress)
     if #jobs == 0 then
         return false, "Ã»ÓÐ¹Ì¼þÈÎÎñ"
     end
+    print("ÉÕÂ¼Æô¶¯")
     self:enter_bootloader()
     uart_clear_rx(self.port)
     if not self:sync() then
