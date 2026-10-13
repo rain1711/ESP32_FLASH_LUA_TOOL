@@ -545,7 +545,7 @@ function ESP.flash_all(self, jobs, expected_chip, on_progress)
             return false, msg
         end
     end
-    if state_verify_enabled() then
+    if state.verify then
         local vok, vmsg = self:verify_all(jobs, on_progress)
         if vok == false then
             self:release_pins()
@@ -579,9 +579,6 @@ state = {
         {name = "firmware.bin", path = PATH .. "/firmware.bin", offset = 0x10000}
     }
 }
-local function state_verify_enabled()
-    return state.verify
-end
 local function parse_manifest_file(mf_path, base_dir)
     local ok, size = pcall(f_size, mf_path)
     if not ok or not size or size <= 0 or size > 4096 then return nil end
