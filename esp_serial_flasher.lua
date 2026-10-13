@@ -403,58 +403,72 @@ function ESP.flash_md5(self, offset, size)
     end
     return nil
 end
-local function md5_sumhex(s)
-    local function lrot(x, n) return ((x << n) | (x >> (32 - n))) & 0xFFFFFFFF end
-    local sft = {7,12,17,22, 5,9,14,20, 4,11,16,23, 6,10,15,21}
-    local K = {}
-    for i = 1, 64 do K[i] = math.floor(2^32 * math.abs(math.sin(i))) & 0xFFFFFFFF end
-    local a0, b0, c0, d0 = 0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476
-    local msg = s
-    local bitlen = #msg * 8
-    msg = msg .. "\x80"
-    while (#msg % 64) ~= 56 do msg = msg .. "\x00" end
-    for i = 1, 8 do msg = msg .. string.char(bitlen & 0xFF); bitlen = bitlen >> 8 end
-    for off = 1, #msg, 64 do
-        local M = {}
-        for i = 0, 15 do
-            local b1, b2, b3, b4 = string.byte(msg, off + i * 4, off + i * 4 + 3)
-            M[i + 1] = ((b1 or 0) | ((b2 or 0) << 8) | ((b3 or 0) << 16) | ((b4 or 0) << 24)) & 0xFFFFFFFF
-        end
-        local A, B, C, D = a0, b0, c0, d0
-        for i = 1, 64 do
-            local F, g
-            if i <= 16 then F = (B & C) | ((~B) & D); g = i
-            elseif i <= 32 then F = (D & B) | ((~D) & C); g = (5 * (i - 1) + 1) % 16 + 1
-            elseif i <= 48 then F = B ~ C ~ D; g = (3 * (i - 1) + 5) % 16 + 1
-            else F = C ~ (B | (~D)); g = (7 * (i - 1)) % 16 + 1 end
-            F = (F + A + K[i] + M[g]) & 0xFFFFFFFF
-            A = D; D = C; C = B
-            local r = sft[math.floor((i - 1) / 16) * 4 + ((i - 1) % 4) + 1]
-            B = (B + lrot(F, r)) & 0xFFFFFFFF
-        end
-        a0 = (a0 + A) & 0xFFFFFFFF; b0 = (b0 + B) & 0xFFFFFFFF
-        c0 = (c0 + C) & 0xFFFFFFFF; d0 = (d0 + D) & 0xFFFFFFFF
+local MD5_S = {7,12,17,22, 5,9,14,20, 4,11,16,23, 6,10,15,21}
+local MD5_K = {}
+for i = 1, 64 do MD5_K[i] = math.floor(2^32 * math.abs(math.sin(i))) & 0xFFFFFFFF end
+local function md5_lrot(x, n) return ((x << n) | (x >> (32 - n))) & 0xFFFFFFFF end
+local function md5_new()
+    return {a = 0x67452301, b = 0xEFCDAB89, c = 0x98BADCFE, d = 0x10325476, buf = "", total = 0}
+end
+local function md5_block(st, blk)
+    local M = {}
+    for i = 0, 15 do
+        local b1, b2, b3, b4 = string.byte(blk, i * 4 + 1, i * 4 + 4)
+        M[i + 1] = ((b1 or 0) | ((b2 or 0) << 8) | ((b3 or 0) << 16) | ((b4 or 0) << 24)) & 0xFFFFFFFF
     end
-    local function wordhex(w)
+    local A, B, C, D = st.a, st.b, st.c, st.d
+    for i = 1, 64 do
+        local F, g
+        if i <= 16 then F = (B & C) | ((~B) & D); g = i
+        elseif i <= 32 then F = (D & B) | ((~D) & C); g = (5 * (i - 1) + 1) % 16 + 1
+        elseif i <= 48 then F = B ~ C ~ D; g = (3 * (i - 1) + 5) % 16 + 1
+        else F = C ~ (B | (~D)); g = (7 * (i - 1)) % 16 + 1 end
+        F = (F + A + MD5_K[i] + M[g]) & 0xFFFFFFFF
+        A = D; D = C; C = B
+        local r = MD5_S[math.floor((i - 1) / 16) * 4 + ((i - 1) % 4) + 1]
+        B = (B + md5_lrot(F, r)) & 0xFFFFFFFF
+    end
+    st.a = (st.a + A) & 0xFFFFFFFF; st.b = (st.b + B) & 0xFFFFFFFF
+    st.c = (st.c + C) & 0xFFFFFFFF; st.d = (st.d + D) & 0xFFFFFFFF
+end
+local function md5_update(st, chunk)
+    st.total = st.total + #chunk
+    local data = st.buf .. chunk
+    local pos = 1
+    while #data - pos + 1 >= 64 do
+        md5_block(st, string.sub(data, pos, pos + 63))
+        pos = pos + 64
+    end
+    st.buf = string.sub(data, pos)
+end
+local function md5_finish(st)
+    local bitlen = st.total * 8
+    local pad = "\x80"
+    local r = (st.total + 1) % 64
+    local need = (r <= 56) and (56 - r) or (56 + 64 - r)
+    pad = pad .. string.rep("\x00", need)
+    for _ = 1, 8 do pad = pad .. string.char(bitlen & 0xFF); bitlen = bitlen >> 8 end
+    md5_update(st, pad)
+    st.buf = ""
+    local function wh(w)
         return string.format("%02x%02x%02x%02x", w & 0xFF, (w >> 8) & 0xFF, (w >> 16) & 0xFF, (w >> 24) & 0xFF)
     end
-    return wordhex(a0) .. wordhex(b0) .. wordhex(c0) .. wordhex(d0)
+    return wh(st.a) .. wh(st.b) .. wh(st.c) .. wh(st.d)
 end
 local function md5_of_file(job)
     local path, size = job.path, job.fsize
     if not job.exist or not size or size <= 0 then return nil end
-    local h -- 增量计算：此处为简化实现，按 16KB 块读后拼接（固件通常 <2MB，内存可承受）
-    local parts = {}
+    local st = md5_new()
     local off = 0
     while off < size do
-        local n = math.min(16384, size - off)
+        local n = math.min(4096, size - off)
         local len, bin = f_read(path, off, n)
         if not len or len <= 0 or not bin then return nil end
-        parts[#parts + 1] = string.sub(bin, 1, len)
+        md5_update(st, string.sub(bin, 1, len))
+        bin = nil
         off = off + len
     end
-    h = md5_sumhex(table.concat(parts))
-    return h
+    return md5_finish(st)
 end
 function ESP.verify_all(self, jobs, on_progress)
     for i, job in ipairs(jobs) do
