@@ -938,6 +938,7 @@ function start_flash()
 		expected_chip,
 		function(pct, st)
 			update_progress(pct, st)
+			if st then print(st) end
 		end
 	)
 	state.busy = false
