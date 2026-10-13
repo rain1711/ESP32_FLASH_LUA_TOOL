@@ -768,9 +768,10 @@ local function draw_menu()
     lcd_refresh()
 end
 function update_progress(pct, status)
-    state.progress, state.status = pct, status or state.status
+    if pct ~= nil then state.progress = pct end
+    state.status = status or state.status
     bar(0, 208, SCREEN_W, 2, C.LINE)
-    if pct > 0 then
+    if state.progress > 0 then
         bar(0, 208, math.floor(SCREEN_W * pct / 100), 2, C.PROG)
     end
     text(0, 212, state.status, 12, state.status_color or C.STATUS, C.BG)
