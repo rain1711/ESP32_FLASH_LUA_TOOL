@@ -772,7 +772,9 @@ function update_progress(pct, status)
     state.status = status or state.status
     bar(0, 208, SCREEN_W, 2, C.LINE)
     if state.progress > 0 then
-        bar(0, 208, math.floor(SCREEN_W * pct / 100), 2, C.PROG)
+        local w = math.floor(SCREEN_W * state.progress / 100)
+        if w > SCREEN_W then w = SCREEN_W end
+        bar(0, 208, w, 2, C.PROG)
     end
     text(0, 212, state.status, 12, state.status_color or C.STATUS, C.BG)
     lcd_refresh()
