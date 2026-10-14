@@ -37,11 +37,13 @@ H7-TOOL 的 ESP 系列脱机烧录小程序：把编译好的固件拷进 H7-TOO
     └── firmware.bin
 ```
 
-`ESP/packages.json`（必须，多包选包依据）：
+`ESP/packages.json`（必须，多包选包依据；仓库 `firmware/packages.json` 是唯一真源，部署时原样拷到卡上 `ESP/` 下）：
 
 ```json
-{"packages": ["BC1-board"]}
+{"packages": ["SwitchBoard", "D2W_ESP32_C5"]}
 ```
+
+加包：往该数组追加包名即可，不要覆盖已有包。
 
 `manifest.json`（包内段表）：
 
