@@ -628,12 +628,21 @@ local function parse_manifest_file(mf_path, base_dir)
 	local label = string.match(body, '"label"%s*:%s*"([^"]+)"')
 	local chip = string.match(body, '"chip"%s*:%s*"([^"]+)"')
 	local files = {}
-	for p, o in string.gmatch(body, '"path"%s*:%s*"([^"]+)"%s*,%s*"offset"%s*:%s*"([^"]+)"') do
+	local function add_file(p, o)
+		if not p then return end
 		local off = tonumber(o)
 		if off == nil then off = 0 end
 		files[#files + 1] = {name = p, path = base_dir .. "/" .. p, offset = off}
 	end
-	if #files == 0 then return nil end
+	-- path在前（offset 可带引号或裸数字）
+	for p, o in string.gmatch(body, '"path"%s*:%s*"([^"]+)"%s*,%s*"offset"%s*:%s*"?([^",}]+)"?') do
+		add_file(p, o)
+	end
+	-- offset在前
+	for o, p in string.gmatch(body, '"offset"%s*:%s*"?([^",}]+)"?%s*,%s*"path"%s*:%s*"([^"]+)"') do
+		add_file(p, o)
+	end
+	if #files == 0 then return nil, "manifest无files" end
 	return {label = label, chip = chip, files = files}
 end
 local function refresh_jobs()
@@ -677,9 +686,11 @@ local function scan_packages()
 	end
 	for _, n in ipairs(names) do
 		local dir = PATH .. "/" .. n
-		local mf = parse_manifest_file(dir .. "/manifest.json", dir)
+		local mf, err = parse_manifest_file(dir .. "/manifest.json", dir)
 		if mf then
 			state.pkgs[#state.pkgs + 1] = {name = n, label = mf.label or n, chip = mf.chip, files = mf.files, dir = dir}
+		else
+			print("跳过包:" .. n .. "(" .. tostring(err or "manifest无效") .. ")")
 		end
 	end
 	if #state.pkgs > 0 then
