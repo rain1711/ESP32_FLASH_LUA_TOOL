@@ -93,6 +93,46 @@ H7-TOOL 的 ESP 系列脱机烧录小程序：把编译好的固件拷进 H7-TOO
 - 校验不一致：确认烧录无 SYNC 重试刷屏，重烧一次。
 - `f_open` 报错：缺文件时的底层提示，放好包后消失；持续刷屏请提 issue。
 
+## 固件打包提示词（发给 AI 用）
+
+```markdown
+# 指令：为 H7-TOOL Lua 烧录脚本打包 ESP32 固件
+
+烧录脚本用法（先读）：https://github.com/rain1711/ESP32_FLASH_LUA_TOOL
+
+## 输入
+
+- 工程源码路径：（填）
+- 目标芯片：（填，如 ESP32-S3）
+- 包名/板子名：（填，须唯一，如 BC1-board）
+
+## 输出
+
+zip 包，解压后与现有 `ESP/` 合并（新增包目录 + 更新 `packages.json`）。
+
+## 步骤
+
+1. 编译（ESP-IDF：`idf.py set-target <芯片> && idf.py build`；Arduino：编译导出 bin）。
+2. 打开 `build/flasher_args.json`，抄下 bootloader / partition-table / app 三个 bin 的烧录地址（不要凭记忆）。
+3. 建目录 `<包名>/`，拷入 3 个 bin。
+4. 写 `<包名>/manifest.json`：
+   ```json
+   {"label": "<包名>", "chip": "<标准名>",
+    "files": [{"path": "xxx.bin", "offset": "0x..."}]}
+   ```
+   `chip` 只能用：ESP32 / ESP32-S2 / ESP32-S3 / ESP32-C3 / ESP32-C2 / ESP32-C6 / ESP32-H2 / ESP32-C5 / ESP32-C61 / ESP32-P4 / ESP8266。
+5. 更新 `packages.json`（追加，不要覆盖已有包）：
+   ```json
+   {"packages": ["SwitchBoard", "<新包名>"]}
+   ```
+6. zip 打包（`<包名>/` + 更新后的 `packages.json`），列出包名、芯片、各文件地址+大小供核对。
+
+## 约束
+
+- 只输出固件包，不改烧录脚本；bin 不进 git。
+- 包名必须唯一；`packages.json` 必须保留已有包。
+```
+
 ## 相对上游的改动
 
 | # | 改动 |
