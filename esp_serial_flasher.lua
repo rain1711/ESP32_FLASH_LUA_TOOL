@@ -522,7 +522,17 @@ function ESP.flash_one(self, job, on_progress, idx, total)
 		if (fsize - addr) == chunk and (#bin % 4 ~= 0) then
 			bin = bin .. string.rep("\xFF", 4 - (#bin % 4))
 		end
-		if not self:flash_data(seq, bin) then
+		local okw, tries = false, 0
+		while not okw and tries < 3 do
+			tries = tries + 1
+			if self:flash_data(seq, bin) then
+				okw = true
+			elseif tries < 3 then
+				print(string.format("¿é%dÖØÊÔ%d", seq, tries))
+				delayms(100)
+			end
+		end
+		if not okw then
 			return false, "Ð´Êý¾ÝÊ§°Ü @¿é" .. seq
 		end
 		seq, addr = seq + 1, addr + #bin
