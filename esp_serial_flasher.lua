@@ -506,6 +506,9 @@ function ESP.flash_one(self, job, on_progress, idx, total)
 		return false, "È±ÎÄ¼þ: " .. job.name
 	end
 	local bs = (self.target == "ESP8266") and 1024 or self.block_size
+	if self.baud and self.baud >= 460800 and self.target ~= "ESP8266" then
+		bs = 1024
+	end
 	local es = (self.target == "ESP8266") and calc_erase_8266(job.offset, fsize) or fsize
 	if not self:flash_begin(job.offset, es, bs, math.ceil(fsize / bs)) then
 		print("FLASH_BEGIN ÃüÁî±»Ð¾Æ¬¾Ü¾ø")
