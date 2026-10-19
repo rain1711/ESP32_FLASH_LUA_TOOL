@@ -6,7 +6,7 @@ local CFG = {
 	EN_PIN = 2, -- D2
 	BOOT_PIN = 3, -- D3
 	TVCC_VOLT = 3.3,
-	BLOCK_SIZE = 4096,
+	BLOCK_SIZE = 1024, -- ROM单包上限，加大可能超出接收缓冲
 	FLASH_SIZE = 0x400000,
 	SYNC_TRIALS = 5
 }
@@ -107,18 +107,19 @@ local function xor8(s)
 	return c
 end
 local function slip_encode(s)
-	local out = ""
-	for i = 1, #s do
-		local b = string.byte(s, i)
-		if b == 0xC0 then
-			out = out .. "\xDB\xDC"
-		elseif b == 0xDB then
-			out = out .. "\xDB\xDD"
-		else
-			out = out .. string.char(b)
+	local t, p, n = {}, 1, #s
+	while true do
+		local i = string.find(s, "[\192\219]", p)
+		if not i then
+			if p == 1 then return s end
+			if p <= n then t[#t + 1] = string.sub(s, p, n) end
+			return table.concat(t)
 		end
+		if i > p then t[#t + 1] = string.sub(s, p, i - 1) end
+		local b = string.byte(s, i)
+		t[#t + 1] = (b == 0xC0) and "\xDB\xDC" or "\xDB\xDD"
+		p = i + 1
 	end
-	return out
 end
 local function slip_decode(s)
 	local out, i = "", 1
@@ -167,7 +168,7 @@ function ESP.apply_target(self)
 end
 function ESP.fill_raw(self, t)
 	t = math.max(1, math.floor(t or 0))
-	local len, str = uart_recive(self.port, 200, t, 10)
+	local len, str = uart_recive(self.port, 200, t, 2) -- 间隔2ms，短应答不必等10ms
 	if len and len > 0 and str then
 		self.rawbuf = self.rawbuf .. str
 		if #self.rawbuf > 8192 then
@@ -404,42 +405,55 @@ function ESP.flash_md5(self, offset, size)
 	return nil
 end
 local MD5_S = {7,12,17,22, 5,9,14,20, 4,11,16,23, 6,10,15,21}
-local MD5_K = {}
-for i = 1, 64 do MD5_K[i] = math.floor(2^32 * math.abs(math.sin(i))) & 0xFFFFFFFF end
+local MD5_K, MD5_R, MD5_G, MD5_M = {}, {}, {}, {}
+for i = 1, 64 do
+	MD5_K[i] = math.floor(2^32 * math.abs(math.sin(i))) & 0xFFFFFFFF
+	MD5_R[i] = MD5_S[((i - 1) >> 4) * 4 + ((i - 1) & 3) + 1]
+	if i <= 16 then MD5_G[i] = i
+	elseif i <= 32 then MD5_G[i] = (5 * (i - 1) + 1) % 16 + 1
+	elseif i <= 48 then MD5_G[i] = (3 * (i - 1) + 5) % 16 + 1
+	else MD5_G[i] = (7 * (i - 1)) % 16 + 1 end
+end
 local function md5_lrot(x, n) return ((x << n) | (x >> (32 - n))) & 0xFFFFFFFF end
 local function md5_new()
 	return {a = 0x67452301, b = 0xEFCDAB89, c = 0x98BADCFE, d = 0x10325476, buf = "", total = 0}
 end
-local function md5_block(st, blk)
-	local M = {}
+local function md5_block(st, blk, off)
+	off = off or 1
 	for i = 0, 15 do
-		local b1, b2, b3, b4 = string.byte(blk, i * 4 + 1, i * 4 + 4)
-		M[i + 1] = ((b1 or 0) | ((b2 or 0) << 8) | ((b3 or 0) << 16) | ((b4 or 0) << 24)) & 0xFFFFFFFF
+		local o = off + i * 4
+		local b1, b2, b3, b4 = string.byte(blk, o, o + 3)
+		MD5_M[i + 1] = ((b1 or 0) | ((b2 or 0) << 8) | ((b3 or 0) << 16) | ((b4 or 0) << 24)) & 0xFFFFFFFF
 	end
 	local A, B, C, D = st.a, st.b, st.c, st.d
 	for i = 1, 64 do
-		local F, g
-		if i <= 16 then F = (B & C) | ((~B) & D); g = i
-		elseif i <= 32 then F = (D & B) | ((~D) & C); g = (5 * (i - 1) + 1) % 16 + 1
-		elseif i <= 48 then F = B ~ C ~ D; g = (3 * (i - 1) + 5) % 16 + 1
-		else F = C ~ (B | (~D)); g = (7 * (i - 1)) % 16 + 1 end
-		F = (F + A + MD5_K[i] + M[g]) & 0xFFFFFFFF
+		local F
+		if i <= 16 then F = (B & C) | ((~B) & D)
+		elseif i <= 32 then F = (D & B) | ((~D) & C)
+		elseif i <= 48 then F = B ~ C ~ D
+		else F = C ~ (B | (~D)) end
+		F = (F + A + MD5_K[i] + MD5_M[MD5_G[i]]) & 0xFFFFFFFF
 		A = D; D = C; C = B
-		local r = MD5_S[math.floor((i - 1) / 16) * 4 + ((i - 1) % 4) + 1]
-		B = (B + md5_lrot(F, r)) & 0xFFFFFFFF
+		B = (B + md5_lrot(F, MD5_R[i])) & 0xFFFFFFFF
 	end
 	st.a = (st.a + A) & 0xFFFFFFFF; st.b = (st.b + B) & 0xFFFFFFFF
 	st.c = (st.c + C) & 0xFFFFFFFF; st.d = (st.d + D) & 0xFFFFFFFF
 end
 local function md5_update(st, chunk)
 	st.total = st.total + #chunk
-	local data = st.buf .. chunk
-	local pos = 1
-	while #data - pos + 1 >= 64 do
-		md5_block(st, string.sub(data, pos, pos + 63))
+	local data = (#st.buf == 0) and chunk or (st.buf .. chunk)
+	local n, pos = #data, 1
+	while n - pos + 1 >= 64 do
+		md5_block(st, data, pos)
 		pos = pos + 64
 	end
-	st.buf = string.sub(data, pos)
+	if pos == 1 then
+		st.buf = data
+	elseif pos > n then
+		st.buf = ""
+	else
+		st.buf = string.sub(data, pos)
+	end
 end
 local function md5_finish(st)
 	local bitlen = st.total * 8
@@ -455,35 +469,11 @@ local function md5_finish(st)
 	end
 	return wh(st.a) .. wh(st.b) .. wh(st.c) .. wh(st.d)
 end
-local function md5_of_file(job, on_progress, tag)
-	local path, size = job.path, job.fsize
-	if not job.exist or not size or size <= 0 then return nil end
-	local st = md5_new()
-	local off, last = 0, -1
-	while off < size do
-		local n = math.min(4096, size - off)
-		local len, bin = f_read(path, off, n)
-		if not len or len <= 0 or not bin then return nil end
-		md5_update(st, string.sub(bin, 1, len))
-		bin = nil
-		off = off + len
-		if on_progress then
-			local pct = math.floor(off * 100 / size)
-			if pct - last >= 10 then
-				last = pct
-				on_progress(nil, string.format("%s MD5 %d%%", tag, pct))
-			end
-		end
-	end
-	return md5_finish(st)
-end
 function ESP.verify_all(self, jobs, on_progress)
 	for i, job in ipairs(jobs) do
-		local fsize = job.fsize
-		if on_progress then on_progress(nil, string.format("校验 %d/%d %s", i, #jobs, job.name)) end
-		local expect = md5_of_file(job, on_progress, string.format("校验%d/%d %s", i, #jobs, job.name))
 		if on_progress then on_progress(nil, string.format("校验%d/%d %s 片上", i, #jobs, job.name)) end
-		local got = self:flash_md5(job.offset, fsize)
+		local expect = job.md5
+		local got = self:flash_md5(job.offset, job.fsize)
 		if not expect or not got then return false, "校验失败:" .. job.name end
 		if string.lower(expect) ~= string.lower(got) then
 			return false, string.format("MD5不一致:%s 本地%s 片上%s", job.name, expect, got)
@@ -500,15 +490,12 @@ local function calc_erase_8266(offset, image_size)
 		return (num_sectors - head_sectors) * 4096
 	end
 end
-function ESP.flash_one(self, job, on_progress, idx, total)
+function ESP.flash_one(self, job, on_progress, idx, total, want_md5)
 	local fsize = job.fsize
 	if not job.exist or not fsize or fsize <= 0 then
 		return false, "缺文件: " .. job.name
 	end
-	local bs = (self.target == "ESP8266") and 1024 or self.block_size
-	if self.baud and self.baud >= 460800 and self.target ~= "ESP8266" then
-		bs = 1024
-	end
+	local bs = self.block_size
 	local es = (self.target == "ESP8266") and calc_erase_8266(job.offset, fsize) or fsize
 	if not self:flash_begin(job.offset, es, bs, math.ceil(fsize / bs)) then
 		print("FLASH_BEGIN 命令被芯片拒绝")
@@ -516,12 +503,17 @@ function ESP.flash_one(self, job, on_progress, idx, total)
 	end
 	print("烧录:" .. job.name)
 	local seq, addr, last_pct = 0, 0, -1
+	local md = want_md5 and md5_new() or nil
+	job.md5 = nil
 	while addr < fsize do
 		local chunk = math.min(bs, fsize - addr)
-		local _, bin = f_read(job.path, addr, chunk)
-		if not bin or #bin == 0 then
+		local len, bin = f_read(job.path, addr, chunk)
+		if not len or len <= 0 or not bin or #bin == 0 then
 			return false, "读文件内容失败 @0x" .. tohex(addr)
 		end
+		if len < #bin then bin = string.sub(bin, 1, len) end
+		if #bin > chunk then bin = string.sub(bin, 1, chunk) end
+		if md then md5_update(md, bin) end
 		if (fsize - addr) == chunk and (#bin % 4 ~= 0) then
 			bin = bin .. string.rep("\xFF", 4 - (#bin % 4))
 		end
@@ -539,20 +531,15 @@ function ESP.flash_one(self, job, on_progress, idx, total)
 			return false, "写数据失败 @块" .. seq
 		end
 		seq, addr = seq + 1, addr + #bin
-		do
-			local pct = math.floor(addr * 100 / fsize)
-			if pct - last_pct >= 10 then
-				last_pct = pct
-				print(string.format("%s %d%%", job.name, pct))
-			end
-		end
-		if on_progress then
-			on_progress(
-				math.floor(addr * 100 / fsize),
-				string.format("段%d/%d %s %d/%d", idx, total, job.name, addr, fsize)
-			)
+		local shown = addr > fsize and fsize or addr
+		local pct = math.floor(shown * 100 / fsize)
+		if pct > 100 then pct = 100 end
+		if on_progress and (pct - last_pct >= 5 or shown >= fsize) then
+			last_pct = pct
+			on_progress(pct, string.format("段%d/%d %s %d/%d", idx, total, job.name, shown, fsize))
 		end
 	end
+	if md then job.md5 = md5_finish(md) end
 	print("完成:" .. job.name)
 	return true
 end
@@ -591,7 +578,7 @@ function ESP.flash_all(self, jobs, expected_chip, on_progress)
 		return false, "SETPARAMS失败"
 	end
 	for i, job in ipairs(jobs) do
-		local ok, msg = self:flash_one(job, on_progress, i, #jobs)
+		local ok, msg = self:flash_one(job, on_progress, i, #jobs, state.verify)
 		if not ok then
 			self:release_pins()
 			return false, msg
@@ -606,7 +593,7 @@ function ESP.flash_all(self, jobs, expected_chip, on_progress)
 	end
 	self:release_pins()
 	if on_progress then
-		on_progress(100, "完成+校验OK")
+		on_progress(100, state.verify and "完成+校验OK" or "完成")
 	end
 	return true, "完成"
 end
@@ -614,7 +601,7 @@ local ui = {}
 local esp = ESP.new(CFG.UART_PORT, CFG.BAUD)
 state = {
 	chip_idx = 1, -- 默认 Auto
-	baud_idx = 1, -- 默认 115200 波特率
+	baud_idx = 4, -- 921600，与 CFG.BAUD 一致
 	sel = 1,
 	progress = 0,
 	status = "就绪",

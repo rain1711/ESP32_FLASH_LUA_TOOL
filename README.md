@@ -60,7 +60,7 @@ H7-TOOL 的 ESP 系列脱机烧录小程序：把编译好的固件拷进 H7-TOO
 
 ## 部署到 H7-TOOL
 
-1. 把 `esp_serial_flasher.lua` 拷到 `0:/H7-TOOL/Lua/`（核对大小，当前版 31280 字节）。
+1. 把 `esp_serial_flasher.lua` 拷到 `0:/H7-TOOL/Lua/`（核对大小，当前版 28584 字节）。
 2. `ESP/` 下建包目录，放 bin + `manifest.json`；`ESP/` 下放 `packages.json`。
 3. 在 H7-TOOL 上运行该脚本。
 
